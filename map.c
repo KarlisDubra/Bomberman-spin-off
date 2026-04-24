@@ -9,40 +9,41 @@ int parse_map(const char *path, Map *map)
 {
     memset(map, 0, sizeof(*map));
 
-    FILE *f = fopen(path, "r");
-    if (!f) {
+    FILE *file = fopen(path, "r");
+    if (!file) {
         fprintf(stderr, "map: cannot open '%s'\n", path);
         return -1;
     }
 
     /* Line 1: width height */
-    unsigned w = 0, h = 0;
-    if (fscanf(f, "%u %u\n", &w, &h) != 2 || w == 0 || h == 0 ||
-        w > MAX_MAP_WIDTH || h > MAX_MAP_HEIGHT) {
-        fprintf(stderr, "map: invalid dimensions %u x %u\n", w, h);
-        fclose(f);
+    unsigned width = 0, height = 0;
+    if (fscanf(file, "%u %u\n", &width, &height) != 2 ||
+        width == 0 || height == 0 ||
+        width > MAX_MAP_WIDTH || height > MAX_MAP_HEIGHT) {
+        fprintf(stderr, "map: invalid dimensions %u x %u\n", width, height);
+        fclose(file);
         return -1;
     }
-    map->width  = (uint8_t)w;
-    map->height = (uint8_t)h;
+    map->width  = (uint8_t)width;
+    map->height = (uint8_t)height;
 
     /* Line 2: explosion duration in ticks */
-    unsigned dur = 0;
-    if (fscanf(f, "%u\n", &dur) != 1 || dur == 0) {
-        fprintf(stderr, "map: invalid explosion duration %u\n", dur);
-        fclose(f);
+    unsigned duration = 0;
+    if (fscanf(file, "%u\n", &duration) != 1 || duration == 0) {
+        fprintf(stderr, "map: invalid explosion duration %u\n", duration);
+        fclose(file);
         return -1;
     }
-    map->explosion_duration = (uint16_t)(dur > 65535 ? 65535 : dur);
+    map->explosion_duration = (uint16_t)(duration > 65535 ? 65535 : duration);
 
     /* Allocate grid arrays */
-    size_t cells = (size_t)w * h;
-    map->cells       = calloc(cells, sizeof(CellType));
-    map->bonus_types = calloc(cells, sizeof(BonusType));
+    size_t num_cells = (size_t)width * height;
+    map->cells       = calloc(num_cells, sizeof(CellType));
+    map->bonus_types = calloc(num_cells, sizeof(BonusType));
     if (!map->cells || !map->bonus_types) {
         fprintf(stderr, "map: out of memory\n");
         map_free(map);
-        fclose(f);
+        fclose(file);
         return -1;
     }
 
@@ -52,7 +53,7 @@ int parse_map(const char *path, Map *map)
     /* Lines 3+: grid rows */
     char line[MAX_MAP_WIDTH + 4]; /* +4 for \r\n\0 and safety */
     for (uint8_t y = 0; y < map->height; y++) {
-        if (!fgets(line, (int)sizeof(line), f)) {
+        if (!fgets(line, (int)sizeof(line), file)) {
             /* Fewer rows than declared — remaining cells stay EMPTY (calloc) */
             break;
         }
@@ -109,7 +110,7 @@ int parse_map(const char *path, Map *map)
         }
     }
 
-    fclose(f);
+    fclose(file);
 
     /* Count consecutive spawn ids starting at 0 */
     map->player_count = 0;
@@ -147,29 +148,29 @@ static bool bfs_spawns_connected(const Map *map, uint8_t player_count)
     const int dy[4] = {-1, 1, 0, 0};
 
     while (head < tail) {
-        int idx = queue[head++];
-        int x = idx % map->width;
-        int y = idx / map->width;
-        for (int d = 0; d < 4; d++) {
-            int nx = x + dx[d], ny = y + dy[d];
+        int cell_idx = queue[head++];
+        int x = cell_idx % map->width;
+        int y = cell_idx / map->width;
+        for (int dir = 0; dir < 4; dir++) {
+            int nx = x + dx[dir], ny = y + dy[dir];
             if (nx < 0 || nx >= map->width || ny < 0 || ny >= map->height) continue;
-            int nidx = ny * map->width + nx;
-            if (visited[nidx]) continue;
-            if (map->cells[nidx] != CELL_EMPTY) continue;
-            visited[nidx] = true;
-            queue[tail++] = nidx;
+            int neighbor_idx = ny * map->width + nx;
+            if (visited[neighbor_idx]) continue;
+            if (map->cells[neighbor_idx] != CELL_EMPTY) continue;
+            visited[neighbor_idx] = true;
+            queue[tail++] = neighbor_idx;
         }
     }
 
-    bool ok = true;
-    for (int p = 1; p < player_count; p++) {
-        int sidx = map->spawn_y[p] * map->width + map->spawn_x[p];
-        if (!visited[sidx]) { ok = false; break; }
+    bool all_reachable = true;
+    for (int player_idx = 1; player_idx < player_count; player_idx++) {
+        int spawn_idx = map->spawn_y[player_idx] * map->width + map->spawn_x[player_idx];
+        if (!visited[spawn_idx]) { all_reachable = false; break; }
     }
 
     free(visited);
     free(queue);
-    return ok;
+    return all_reachable;
 }
 
 /* ── Random map generator ───────────────────────────────────────────────── */
@@ -177,15 +178,15 @@ static bool bfs_spawns_connected(const Map *map, uint8_t player_count)
 /* Spawn positions for up to 8 players (indices match player ids) */
 static void set_spawns(Map *map)
 {
-    uint8_t w = map->width, h = map->height;
-    map->spawn_x[0] = 1;     map->spawn_y[0] = 1;
-    map->spawn_x[1] = w - 2; map->spawn_y[1] = h - 2;
-    map->spawn_x[2] = w - 2; map->spawn_y[2] = 1;
-    map->spawn_x[3] = 1;     map->spawn_y[3] = h - 2;
-    map->spawn_x[4] = 1;     map->spawn_y[4] = h / 2;
-    map->spawn_x[5] = w - 2; map->spawn_y[5] = h / 2;
-    map->spawn_x[6] = w / 2; map->spawn_y[6] = 1;
-    map->spawn_x[7] = w / 2; map->spawn_y[7] = h - 2;
+    uint8_t width = map->width, height = map->height;
+    map->spawn_x[0] = 1;         map->spawn_y[0] = 1;
+    map->spawn_x[1] = width - 2; map->spawn_y[1] = height - 2;
+    map->spawn_x[2] = width - 2; map->spawn_y[2] = 1;
+    map->spawn_x[3] = 1;         map->spawn_y[3] = height - 2;
+    map->spawn_x[4] = 1;         map->spawn_y[4] = height / 2;
+    map->spawn_x[5] = width - 2; map->spawn_y[5] = height / 2;
+    map->spawn_x[6] = width / 2; map->spawn_y[6] = 1;
+    map->spawn_x[7] = width / 2; map->spawn_y[7] = height - 2;
 }
 
 int map_generate(Map *map, uint8_t width, uint8_t height,
@@ -200,10 +201,10 @@ int map_generate(Map *map, uint8_t width, uint8_t height,
     if (player_count > MAX_PLAYERS) player_count = MAX_PLAYERS;
 
     memset(map, 0, sizeof(*map));
-    map->width            = width;
-    map->height           = height;
+    map->width              = width;
+    map->height             = height;
     map->explosion_duration = 10;
-    map->player_count     = player_count;
+    map->player_count       = player_count;
     set_spawns(map);
 
     size_t ncells = (size_t)width * height;
@@ -222,7 +223,6 @@ int map_generate(Map *map, uint8_t width, uint8_t height,
         bonus_pool = POOL_MOBILITY; pool_size = 3;
     }
 
-
     /* Try up to 100 seeds until all spawns are connected */
     for (int attempt = 0; attempt <= 100; attempt++) {
         srand(seed + (unsigned)attempt);
@@ -230,8 +230,8 @@ int map_generate(Map *map, uint8_t width, uint8_t height,
 
         /* Border */
         for (uint8_t x = 0; x < width; x++) {
-            map->cells[x]                      = CELL_HARD_WALL;
-            map->cells[(height - 1) * width + x] = CELL_HARD_WALL;
+            map->cells[x]                         = CELL_HARD_WALL;
+            map->cells[(height - 1) * width + x]  = CELL_HARD_WALL;
         }
         for (uint8_t y = 0; y < height; y++) {
             map->cells[y * width]             = CELL_HARD_WALL;
@@ -252,15 +252,16 @@ int map_generate(Map *map, uint8_t width, uint8_t height,
             }
         }
 
-        /* Clear spawn areas (spawn cell + 4 neighbours) */
+        /* Clear spawn areas (spawn cell + 4 neighbours) so players can move */
         const int offsets[5][2] = {{0,0},{1,0},{-1,0},{0,1},{0,-1}};
-        for (int p = 0; p < player_count; p++) {
-            for (int k = 0; k < 5; k++) {
-                int cx = map->spawn_x[p] + offsets[k][0];
-                int cy = map->spawn_y[p] + offsets[k][1];
-                if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
-                if (map->cells[cy * width + cx] == CELL_HARD_WALL) continue;
-                map->cells[cy * width + cx] = CELL_EMPTY;
+        for (int player_idx = 0; player_idx < player_count; player_idx++) {
+            for (int offset_idx = 0; offset_idx < 5; offset_idx++) {
+                int clear_x = map->spawn_x[player_idx] + offsets[offset_idx][0];
+                int clear_y = map->spawn_y[player_idx] + offsets[offset_idx][1];
+                if (clear_x < 0 || clear_x >= width ||
+                    clear_y < 0 || clear_y >= height) continue;
+                if (map->cells[clear_y * width + clear_x] == CELL_HARD_WALL) continue;
+                map->cells[clear_y * width + clear_x] = CELL_EMPTY;
             }
         }
 
@@ -268,7 +269,7 @@ int map_generate(Map *map, uint8_t width, uint8_t height,
         if (attempt < 100 && !bfs_spawns_connected(map, player_count))
             continue;
 
-        /* Place bonus items (replace ~8% of soft blocks) */
+        /* Place bonus items (replace ~10% of soft blocks) */
         for (int y = 1; y < height - 1; y++) {
             for (int x = 1; x < width - 1; x++) {
                 if (map->cells[y * width + x] != CELL_SOFT_BLOCK) continue;

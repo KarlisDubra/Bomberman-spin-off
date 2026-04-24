@@ -144,14 +144,14 @@ int main(int argc, char *argv[])
 {
     /* Parse args: optional map file, optional player count */
     for (int i = 1; i < argc; i++) {
-        char *a = argv[i];
+        char *arg = argv[i];
         /* Pure number → player count, implies random lobby */
-        int n = atoi(a);
-        if (n >= 2 && n <= MAX_PLAYERS) {
-            g_player_count = (uint8_t)n;
-        } else if (strcmp(a, "random") != 0) {
+        int player_count = atoi(arg);
+        if (player_count >= 2 && player_count <= MAX_PLAYERS) {
+            g_player_count = (uint8_t)player_count;
+        } else if (strcmp(arg, "random") != 0) {
             /* Treat as map file — skip lobby */
-            g_map_file = a;
+            g_map_file = arg;
         }
         /* "random" is accepted but we default to lobby anyway */
     }
