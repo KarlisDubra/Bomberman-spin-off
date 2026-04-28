@@ -1,191 +1,131 @@
-#define _POSIX_C_SOURCE 199309L   /* expose clock_gettime / CLOCK_MONOTONIC */
 #include "game.h"
-#include "map.h"
+#include "net.h"
 #include "render.h"
+
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-/* ── Game phase ─────────────────────────────────────────────────────────── */
 
 typedef enum { PHASE_LOBBY, PHASE_PLAYING, PHASE_RESULTS } GamePhase;
 
-/* ── Globals ────────────────────────────────────────────────────────────── */
+static GameState *g_state = NULL;
+static NetClient  g_client;
+static GamePhase  g_phase = PHASE_LOBBY;
 
-static GameState  *g_state        = NULL;
-static GamePhase   g_phase        = PHASE_LOBBY;
-static Map         g_lobby_maps[GAMEMODE_COUNT];
-static unsigned    g_lobby_seeds[GAMEMODE_COUNT];
-static int         g_selected     = 0;          /* 0 or 1 */
-static uint8_t     g_player_count = 4;
-static const char *g_map_file     = NULL;        /* NULL = use lobby */
-
-/* Nanosecond-precision seed so rapid restarts always get a different map */
-static unsigned int new_seed(void)
+static void send_move(char direction)
 {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (unsigned int)(ts.tv_nsec ^ ((unsigned long)ts.tv_sec << 17));
+    if (g_phase != PHASE_PLAYING || !g_client.has_map) return;
+    net_client_send_move(&g_client, direction);
 }
-
-/* Generate (or re-generate) both lobby preview maps */
-static void lobby_generate(void)
-{
-    for (int m = 0; m < GAMEMODE_COUNT; m++) {
-        map_free(&g_lobby_maps[m]);
-        g_lobby_seeds[m] = new_seed();
-        map_generate(&g_lobby_maps[m], 15, 11,
-                     g_player_count, g_lobby_seeds[m], (GameMode)m);
-    }
-}
-
-/* Start a game from the currently selected lobby map */
-static void lobby_start(GLFWwindow *win)
-{
-    game_free(g_state);
-    g_state = game_init_random(15, 11, g_player_count,
-                               g_lobby_seeds[g_selected],
-                               (GameMode)g_selected);
-    if (!g_state) {
-        fprintf(stderr, "Failed to start game\n");
-        glfwSetWindowShouldClose(win, GLFW_TRUE);
-        return;
-    }
-    g_phase = PHASE_PLAYING;
-}
-
-/* ── Key callback ───────────────────────────────────────────────────────── */
 
 static void key_callback(GLFWwindow *win, int key, int scancode,
                          int action, int mods)
 {
-    (void)scancode; (void)mods;
+    (void)scancode;
+    (void)mods;
+
     if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
 
-    /* ── Lobby controls ── */
+    if (key == GLFW_KEY_ESCAPE) {
+        glfwSetWindowShouldClose(win, GLFW_TRUE);
+        return;
+    }
+
     if (g_phase == PHASE_LOBBY) {
-        switch (key) {
-        case GLFW_KEY_LEFT:  case GLFW_KEY_A:
-            g_selected = 0; break;
-        case GLFW_KEY_RIGHT: case GLFW_KEY_D:
-            g_selected = 1; break;
-        case GLFW_KEY_1: g_selected = 0; break;
-        case GLFW_KEY_2: g_selected = 1; break;
-        case GLFW_KEY_ENTER:
-        case GLFW_KEY_KP_ENTER:
-        case GLFW_KEY_SPACE:
-            lobby_start(win); break;
-        case GLFW_KEY_R:
-            lobby_generate(); break;
-        case GLFW_KEY_ESCAPE:
-            glfwSetWindowShouldClose(win, GLFW_TRUE); break;
-        default: break;
+        if (action == GLFW_PRESS &&
+            (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER ||
+             key == GLFW_KEY_SPACE)) {
+            net_client_send_ready(&g_client);
         }
         return;
     }
 
-    /* ── Results screen: only R and Escape ── */
     if (g_phase == PHASE_RESULTS) {
-        if (key == GLFW_KEY_R) {
-            game_free(g_state);
-            g_state = NULL;
-            lobby_generate();
+        if (action == GLFW_PRESS &&
+            (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER ||
+             key == GLFW_KEY_SPACE)) {
+            uint8_t status = GAME_LOBBY;
+            net_send_msg(g_client.fd, MSG_SET_STATUS, g_client.player_id,
+                         TARGET_SERVER, &status, sizeof(status));
             g_phase = PHASE_LOBBY;
-        } else if (key == GLFW_KEY_ESCAPE) {
-            glfwSetWindowShouldClose(win, GLFW_TRUE);
         }
         return;
     }
-
-    /* ── In-game controls ── */
-    if (!g_state) return;
 
     switch (key) {
-    /* Player 0 — Arrow keys + Enter */
-    case GLFW_KEY_UP:    game_queue_action(g_state, 0, ACTION_MOVE_UP);    break;
-    case GLFW_KEY_DOWN:  game_queue_action(g_state, 0, ACTION_MOVE_DOWN);  break;
-    case GLFW_KEY_LEFT:  game_queue_action(g_state, 0, ACTION_MOVE_LEFT);  break;
-    case GLFW_KEY_RIGHT: game_queue_action(g_state, 0, ACTION_MOVE_RIGHT); break;
-    case GLFW_KEY_ENTER: game_queue_action(g_state, 0, ACTION_PLACE_BOMB); break;
-
-    /* Player 1 — WASD + Q */
-    case GLFW_KEY_W:     game_queue_action(g_state, 1, ACTION_MOVE_UP);    break;
-    case GLFW_KEY_S:     game_queue_action(g_state, 1, ACTION_MOVE_DOWN);  break;
-    case GLFW_KEY_A:     game_queue_action(g_state, 1, ACTION_MOVE_LEFT);  break;
-    case GLFW_KEY_D:     game_queue_action(g_state, 1, ACTION_MOVE_RIGHT); break;
-    case GLFW_KEY_Q:     game_queue_action(g_state, 1, ACTION_PLACE_BOMB); break;
-
-    /* Player 2 — IJKL + U */
-    case GLFW_KEY_I:     game_queue_action(g_state, 2, ACTION_MOVE_UP);    break;
-    case GLFW_KEY_K:     game_queue_action(g_state, 2, ACTION_MOVE_DOWN);  break;
-    case GLFW_KEY_J:     game_queue_action(g_state, 2, ACTION_MOVE_LEFT);  break;
-    case GLFW_KEY_L:     game_queue_action(g_state, 2, ACTION_MOVE_RIGHT); break;
-    case GLFW_KEY_U:     game_queue_action(g_state, 2, ACTION_PLACE_BOMB); break;
-
-    /* Player 3 — Numpad 8456 + 0 */
-    case GLFW_KEY_KP_8:  game_queue_action(g_state, 3, ACTION_MOVE_UP);    break;
-    case GLFW_KEY_KP_5:  game_queue_action(g_state, 3, ACTION_MOVE_DOWN);  break;
-    case GLFW_KEY_KP_4:  game_queue_action(g_state, 3, ACTION_MOVE_LEFT);  break;
-    case GLFW_KEY_KP_6:  game_queue_action(g_state, 3, ACTION_MOVE_RIGHT); break;
-    case GLFW_KEY_KP_0:  game_queue_action(g_state, 3, ACTION_PLACE_BOMB); break;
-
-    case GLFW_KEY_ESCAPE:
-        glfwSetWindowShouldClose(win, GLFW_TRUE); break;
-
-    default: break;
+    case GLFW_KEY_UP:
+    case GLFW_KEY_W:
+        send_move('U');
+        break;
+    case GLFW_KEY_DOWN:
+    case GLFW_KEY_S:
+        send_move('D');
+        break;
+    case GLFW_KEY_LEFT:
+    case GLFW_KEY_A:
+        send_move('L');
+        break;
+    case GLFW_KEY_RIGHT:
+    case GLFW_KEY_D:
+        send_move('R');
+        break;
+    case GLFW_KEY_ENTER:
+    case GLFW_KEY_KP_ENTER:
+    case GLFW_KEY_SPACE:
+        if (action == GLFW_PRESS && g_client.has_map)
+            net_client_send_bomb(&g_client, g_state);
+        break;
+    default:
+        break;
     }
 }
 
-/* ── Entry point ────────────────────────────────────────────────────────── */
+static const char *status_name(GameStatus status)
+{
+    switch (status) {
+    case GAME_LOBBY: return "lobby";
+    case GAME_RUNNING: return "running";
+    case GAME_END: return "end";
+    default: return "unknown";
+    }
+}
 
 int main(int argc, char *argv[])
 {
-    /* Parse args: optional map file, optional player count */
-    for (int i = 1; i < argc; i++) {
-        char *a = argv[i];
-        /* Pure number → player count, implies random lobby */
-        int n = atoi(a);
-        if (n >= 2 && n <= MAX_PLAYERS) {
-            g_player_count = (uint8_t)n;
-        } else if (strcmp(a, "random") != 0) {
-            /* Treat as map file — skip lobby */
-            g_map_file = a;
-        }
-        /* "random" is accepted but we default to lobby anyway */
+    const char *player_name = (argc > 1) ? argv[1] : "DaBomb";
+    const char *host = (argc > 2) ? argv[2] : NET_DEFAULT_HOST;
+    int port = (argc > 3) ? atoi(argv[3]) : NET_PORT;
+    if (port <= 0) port = NET_PORT;
+
+    g_state = game_client_create();
+    if (!g_state) {
+        fprintf(stderr, "Failed to allocate client state\n");
+        return 1;
+    }
+
+    if (net_client_connect(&g_client, host, port) != 0 ||
+        net_client_hello(&g_client, player_name) != 0) {
+        fprintf(stderr, "Failed to connect or join %s:%d\n", host, port);
+        game_free(g_state);
+        return 1;
     }
 
     if (!glfwInit()) {
         fprintf(stderr, "Failed to init GLFW\n");
+        net_client_close(&g_client);
+        game_free(g_state);
         return 1;
     }
+
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-
-    int win_w, win_h;
-
-    /* If a specific map file was given, skip straight to game */
-    if (g_map_file) {
-        g_state = game_init(g_map_file);
-        if (!g_state) {
-            fprintf(stderr, "Failed to load map: %s\n", g_map_file);
-            glfwTerminate();
-            return 1;
-        }
-        win_w   = g_state->map.width  * CELL_SIZE;
-        win_h   = g_state->map.height * CELL_SIZE + HUD_HEIGHT;
-        g_phase = PHASE_PLAYING;
-    } else {
-        /* Lobby mode — generate preview maps, use fixed window size */
-        lobby_generate();
-        win_w = LOBBY_WIN_W;
-        win_h = LOBBY_WIN_H;
-    }
-
-    GLFWwindow *window = glfwCreateWindow(win_w, win_h, "Bomberman", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(LOBBY_WIN_W, LOBBY_WIN_H,
+                                          "Bomberman Client", NULL, NULL);
     if (!window) {
         fprintf(stderr, "Failed to create window\n");
         glfwTerminate();
+        net_client_close(&g_client);
+        game_free(g_state);
         return 1;
     }
 
@@ -194,67 +134,66 @@ int main(int argc, char *argv[])
     glfwSetKeyCallback(window, key_callback);
     render_init(15, 11);
 
-    printf("Controls:\n");
-    printf("  Lobby:  Left/Right (or 1/2) to choose mode\n");
-    printf("          Enter/Space to play   R to regenerate\n");
-    printf("  P0: Arrows + Enter   P1: WASD + Q\n");
-    printf("  P2: IJKL + U         P3: Numpad 8456 + 0\n");
-    printf("  R: back to lobby     Esc: quit\n\n");
+    printf("Connected to %s:%d as player %u\n", host, port, g_client.player_id);
+    printf("Lobby: Enter/Space = ready, Esc = quit\n");
+    printf("Game:  WASD/Arrows = move attempt, Enter/Space = bomb attempt\n");
 
-    double last_tick = glfwGetTime();
-    const double TICK_DT = 1.0 / TICKS_PER_SECOND;
+    int last_w = 0;
+    int last_h = 0;
     char title[160];
 
-    while (!glfwWindowShouldClose(window)) {
+    while (!glfwWindowShouldClose(window) && g_client.connected) {
         glfwPollEvents();
 
-        if (g_phase == PHASE_LOBBY) {
-            render_lobby(win_w, win_h, g_lobby_maps, g_selected);
-            snprintf(title, sizeof(title),
-                     "Bomberman — Select mode   Left/Right   Enter to play   R refresh");
-
-        } else if (g_phase == PHASE_PLAYING) {
-            double now = glfwGetTime();
-            while (!game_is_over(g_state) && now - last_tick >= TICK_DT) {
-                game_tick(g_state);
-                last_tick += TICK_DT;
-            }
-            render_frame(g_state);
-
-            if (game_is_over(g_state)) {
-                g_phase = PHASE_RESULTS;
-            } else {
-                snprintf(title, sizeof(title),
-                         "Bomberman — Tick %-4u  P0=Arrows  P1=WASD  P2=IJKL  P3=Numpad",
-                         g_state->tick_count);
-            }
-
-        } else { /* PHASE_RESULTS */
-            render_frame(g_state);
-            int winner = game_get_winner(g_state);
-            char over_msg[32];
-            if (winner == NO_WINNER)
-                snprintf(over_msg, sizeof(over_msg), "DRAW");
-            else
-                snprintf(over_msg, sizeof(over_msg), "PLAYER %d WINS", winner + 1);
-            render_game_over(g_state->map.width, g_state->map.height, winner, over_msg);
-            if (winner == NO_WINNER)
-                snprintf(title, sizeof(title),
-                         "Bomberman — DRAW   [R] lobby  [Esc] quit");
-            else
-                snprintf(title, sizeof(title),
-                         "Bomberman — Player %d wins!   [R] lobby  [Esc] quit", winner);
+        if (net_client_poll(&g_client, g_state) < 0) {
+            fprintf(stderr, "Server connection closed\n");
+            break;
         }
 
+        if (g_client.status == GAME_RUNNING && g_client.has_map && !g_state->game_over)
+            g_phase = PHASE_PLAYING;
+        else if (g_client.status == GAME_END || g_state->game_over)
+            g_phase = PHASE_RESULTS;
+        else
+            g_phase = PHASE_LOBBY;
+
+        if (g_client.has_map &&
+            (last_w != g_state->map.width || last_h != g_state->map.height)) {
+            last_w = g_state->map.width;
+            last_h = g_state->map.height;
+            glfwSetWindowSize(window, last_w * CELL_SIZE,
+                              last_h * CELL_SIZE + HUD_HEIGHT);
+        }
+
+        if (g_client.has_map) {
+            render_frame(g_state);
+            if (g_phase == PHASE_RESULTS) {
+                int winner = game_get_winner(g_state);
+                char msg[32];
+                if (winner == NO_WINNER)
+                    snprintf(msg, sizeof(msg), "GAME OVER");
+                else
+                    snprintf(msg, sizeof(msg), "PLAYER %d WINS", winner + 1);
+                render_game_over(g_state->map.width, g_state->map.height,
+                                 winner, msg);
+            }
+        } else {
+            glViewport(0, 0, LOBBY_WIN_W, LOBBY_WIN_H);
+            glClearColor(0.10f, 0.10f, 0.12f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+        }
+
+        snprintf(title, sizeof(title), "Bomberman Client - P%u - %s%s",
+                 g_client.player_id + 1, status_name(g_client.status),
+                 g_client.has_map ? "" : " - waiting for map");
         glfwSetWindowTitle(window, title);
         glfwSwapBuffers(window);
     }
 
     render_cleanup();
-    game_free(g_state);
-    for (int m = 0; m < GAMEMODE_COUNT; m++)
-        map_free(&g_lobby_maps[m]);
     glfwDestroyWindow(window);
     glfwTerminate();
+    net_client_close(&g_client);
+    game_free(g_state);
     return 0;
 }

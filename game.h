@@ -39,9 +39,12 @@ typedef enum {
 } CellType;
 
 typedef enum {
-    BONUS_SHIELD  = 0,  /* absorbs one explosion hit */
-    BONUS_KICK    = 1,  /* moving into a bomb slides it */
-    BONUS_MEGA    = 2   /* next bomb ignores soft blocks, reaches hard wall */
+    BONUS_SPEED  = 0,  /* spec default: movement speed +1 */
+    BONUS_RADIUS = 1,  /* spec default: bomb radius +1 */
+    BONUS_TIMER  = 2,  /* spec default: bomb timer +1 */
+    BONUS_SHIELD = 3,  /* special: absorbs one explosion hit */
+    BONUS_KICK   = 4,  /* special: moving into a bomb slides it */
+    BONUS_MEGA   = 5   /* special: next bomb ignores soft blocks */
 } BonusType;
 
 typedef enum {
@@ -143,6 +146,31 @@ typedef struct {
 
 /* Load map file, allocate and initialize game state. Returns NULL on error. */
 GameState *game_init(const char *map_file);
+
+/* Create an empty client-side state that is populated from server messages. */
+GameState *game_client_create(void);
+
+/* Replace the client-side map with the MAP payload received from the server. */
+int game_client_set_map(GameState *state, uint8_t rows, uint8_t cols,
+                        const uint8_t *cells);
+
+/* Apply server-authoritative events to the renderable client mirror state. */
+void game_client_set_status(GameState *state, uint8_t player_id,
+                            bool alive, bool ready);
+void game_client_apply_moved(GameState *state, uint8_t player_id,
+                             uint16_t cell_index);
+void game_client_apply_bomb(GameState *state, uint8_t player_id,
+                            uint16_t cell_index);
+void game_client_apply_explosion_start(GameState *state, uint8_t radius,
+                                       uint16_t cell_index);
+void game_client_apply_explosion_end(GameState *state, uint16_t cell_index);
+void game_client_apply_death(GameState *state, uint8_t player_id);
+void game_client_apply_bonus_available(GameState *state, uint8_t bonus_type,
+                                       uint16_t cell_index);
+void game_client_apply_bonus_retrieved(GameState *state, uint8_t player_id,
+                                       uint16_t cell_index);
+void game_client_apply_block_destroyed(GameState *state, uint16_t cell_index);
+void game_client_apply_winner(GameState *state, int8_t winner);
 
 /*
  * Generate a random map and initialize game state.

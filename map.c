@@ -70,11 +70,27 @@ int parse_map(const char *path, Map *map)
                 break;
             case 'A':
                 map->cells[idx] = CELL_BONUS;
+                map->bonus_types[idx] = BONUS_SPEED;
+                break;
+            case 'R':
+                map->cells[idx] = CELL_BONUS;
+                map->bonus_types[idx] = BONUS_RADIUS;
+                break;
+            case 'T':
+                map->cells[idx] = CELL_BONUS;
+                map->bonus_types[idx] = BONUS_TIMER;
+                break;
+            case 'X':
+                map->cells[idx] = CELL_BONUS;
                 map->bonus_types[idx] = BONUS_SHIELD;
                 break;
-            case 'B':
+            case 'K':
                 map->cells[idx] = CELL_BONUS;
                 map->bonus_types[idx] = BONUS_KICK;
+                break;
+            case 'M':
+                map->cells[idx] = CELL_BONUS;
+                map->bonus_types[idx] = BONUS_MEGA;
                 break;
             case '.':
                 map->cells[idx] = CELL_EMPTY;
@@ -195,7 +211,7 @@ int map_generate(Map *map, uint8_t width, uint8_t height,
     map->bonus_types = calloc(ncells, sizeof(BonusType));
     if (!map->cells || !map->bonus_types) { map_free(map); return -1; }
 
-    static const BonusType POOL_MOBILITY[] = { BONUS_MEGA,  BONUS_KICK,  BONUS_SHIELD };
+    static const BonusType POOL_MOBILITY[] = { BONUS_SPEED, BONUS_RADIUS, BONUS_TIMER };
     static const BonusType POOL_BIG_BOOM[] = { BONUS_MEGA,  BONUS_KICK,  BONUS_SHIELD };
 
     const BonusType *bonus_pool;

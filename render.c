@@ -152,6 +152,9 @@ static void draw_digit(float cx, float cy, float size,
 static void bonus_color(BonusType bt, float *r, float *g, float *b)
 {
     switch (bt) {
+    case BONUS_SPEED:  *r = 1.00f; *g = 0.86f; *b = 0.10f; break; /* yellow */
+    case BONUS_RADIUS: *r = 1.00f; *g = 0.38f; *b = 0.10f; break; /* orange */
+    case BONUS_TIMER:  *r = 0.80f; *g = 0.40f; *b = 1.00f; break; /* violet */
     case BONUS_SHIELD: *r = 0.25f; *g = 0.55f; *b = 1.00f; break; /* blue  */
     case BONUS_KICK:   *r = 0.20f; *g = 1.00f; *b = 0.15f; break; /* lime  */
     case BONUS_MEGA:   *r = 1.00f; *g = 0.10f; *b = 0.10f; break; /* red   */
@@ -579,9 +582,9 @@ static const float MODE_COLOR[GAMEMODE_COUNT][3]  = {
     { 0.10f, 0.85f, 0.85f },   /* MOBILITY  */
     { 1.00f, 0.55f, 0.10f },   /* BIG BOOM  */
 };
-/* All modes share the same three bonuses — map difference is layout/density */
+/* Lobby preview only; live games render whatever the server sends in MSG_MAP. */
 static const BonusType MODE_ICONS[GAMEMODE_COUNT][3] = {
-    { BONUS_SHIELD, BONUS_KICK, BONUS_MEGA },
+    { BONUS_SPEED, BONUS_RADIUS, BONUS_TIMER },
     { BONUS_SHIELD, BONUS_KICK, BONUS_MEGA },
 };
 
@@ -662,11 +665,11 @@ void render_lobby(int win_w, int win_h,
     rect(win_w * 0.08f, sep_y, win_w * 0.84f, 1.0f, 0.35f, 0.35f, 0.45f, 1.0f);
 
     /* Three bonus entries: coloured diamond + label, evenly spaced */
-    static const BonusType LEGEND_BONUS[3]  = { BONUS_SHIELD, BONUS_KICK, BONUS_MEGA };
-    static const char     *LEGEND_LABEL[3]  = { "SHIELD",     "KICK",     "BLAST"    };
-    static const char     *LEGEND_DESC[3]   = { "ABSORBS ONE HIT",
-                                                "KICK BOMBS",
-                                                "BREAKS WALLS" };
+    static const BonusType LEGEND_BONUS[3]  = { BONUS_SPEED, BONUS_RADIUS, BONUS_TIMER };
+    static const char     *LEGEND_LABEL[3]  = { "SPEED",     "RADIUS",    "TIMER"    };
+    static const char     *LEGEND_DESC[3]   = { "MOVE SPEED +1",
+                                                "BLAST RANGE +1",
+                                                "FUSE TIMER +1" };
     float legend_y   = (float)win_h * 0.785f;
     float desc_y     = legend_y + 22.0f;
     float slots[3]   = { (float)win_w * 0.22f,

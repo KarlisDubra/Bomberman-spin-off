@@ -84,8 +84,11 @@ static void add_explosion_cell(GameState *s, uint8_t x, uint8_t y, uint8_t owner
 static void apply_bonus(Player *player, BonusType bonus_type)
 {
     switch (bonus_type) {
-    case BONUS_SHIELD: player->shielded   = true; break;
-    case BONUS_KICK:   player->can_kick   = true; break;
+    case BONUS_SPEED:  player->speed++; break;
+    case BONUS_RADIUS: player->radius++; break;
+    case BONUS_TIMER:  player->fuse_time++; break;
+    case BONUS_SHIELD: player->shielded  = true; break;
+    case BONUS_KICK:   player->can_kick  = true; break;
     case BONUS_MEGA:   player->mega_next = true; break;
     }
 }
@@ -451,4 +454,240 @@ GameState *game_init_random(uint8_t width, uint8_t height,
 
     s->winner = (int8_t)NO_WINNER;
     return s;
+}
+
+GameState *game_client_create(void)
+{
+    GameState *s = calloc(1, sizeof(GameState));
+    if (!s) return NULL;
+
+    s->player_count = MAX_PLAYERS;
+    s->winner = (int8_t)NO_WINNER;
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        Player *p = &s->players[i];
+        p->speed = DEFAULT_SPEED;
+        p->radius = DEFAULT_RADIUS;
+        p->fuse_time = DEFAULT_FUSE_TICKS;
+        p->bombs_available = DEFAULT_BOMBS;
+        p->lives = 1;
+        p->alive = false;
+    }
+    return s;
+}
+
+static CellType cell_from_server(uint8_t value, BonusType *bonus_out)
+{
+    if (bonus_out) *bonus_out = BONUS_SPEED;
+
+    switch (value) {
+    case 'H': return CELL_HARD_WALL;
+    case 'S': return CELL_SOFT_BLOCK;
+    case '.': return CELL_EMPTY;
+    case 'A':
+        if (bonus_out) *bonus_out = BONUS_SPEED;
+        return CELL_BONUS;
+    case 'R':
+        if (bonus_out) *bonus_out = BONUS_RADIUS;
+        return CELL_BONUS;
+    case 'T':
+        if (bonus_out) *bonus_out = BONUS_TIMER;
+        return CELL_BONUS;
+    case 'X':
+        if (bonus_out) *bonus_out = BONUS_SHIELD;
+        return CELL_BONUS;
+    case 'K':
+        if (bonus_out) *bonus_out = BONUS_KICK;
+        return CELL_BONUS;
+    case 'M':
+        if (bonus_out) *bonus_out = BONUS_MEGA;
+        return CELL_BONUS;
+    default:
+        if (value >= '1' && value <= '8') return CELL_EMPTY;
+        if (value == 0) return CELL_EMPTY;
+        if (value == 1) return CELL_HARD_WALL;
+        if (value == 2) return CELL_SOFT_BLOCK;
+        if (value == 3) return CELL_BONUS;
+        return CELL_EMPTY;
+    }
+}
+
+int game_client_set_map(GameState *s, uint8_t rows, uint8_t cols,
+                        const uint8_t *cells)
+{
+    if (!s || !cells || rows == 0 || cols == 0) return -1;
+
+    map_free(&s->map);
+    memset(&s->map, 0, sizeof(s->map));
+    s->map.width = cols;
+    s->map.height = rows;
+    s->map.player_count = MAX_PLAYERS;
+    s->map.explosion_duration = 5;
+
+    size_t count = (size_t)rows * cols;
+    s->map.cells = calloc(count, sizeof(CellType));
+    s->map.bonus_types = calloc(count, sizeof(BonusType));
+    if (!s->map.cells || !s->map.bonus_types) {
+        map_free(&s->map);
+        return -1;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        BonusType bonus = BONUS_SPEED;
+        s->map.cells[i] = cell_from_server(cells[i], &bonus);
+        s->map.bonus_types[i] = bonus;
+        if (cells[i] >= '1' && cells[i] <= '8') {
+            uint8_t pid = (uint8_t)(cells[i] - '1');
+            s->map.spawn_x[pid] = (uint8_t)(i % cols);
+            s->map.spawn_y[pid] = (uint8_t)(i / cols);
+            s->players[pid].x = s->map.spawn_x[pid];
+            s->players[pid].y = s->map.spawn_y[pid];
+            s->players[pid].alive = true;
+        }
+    }
+
+    s->player_count = MAX_PLAYERS;
+    s->bomb_count = 0;
+    s->explosion_count = 0;
+    s->game_over = false;
+    s->winner = (int8_t)NO_WINNER;
+    return 0;
+}
+
+void game_client_set_status(GameState *s, uint8_t player_id,
+                            bool alive, bool ready)
+{
+    (void)ready;
+    if (!s || player_id >= MAX_PLAYERS) return;
+    s->players[player_id].alive = alive;
+}
+
+static bool cell_to_xy(const GameState *s, uint16_t cell_index,
+                       uint8_t *x, uint8_t *y)
+{
+    if (!s || s->map.width == 0 || s->map.height == 0) return false;
+    uint16_t total = (uint16_t)s->map.width * (uint16_t)s->map.height;
+    if (cell_index >= total) return false;
+    *x = (uint8_t)(cell_index % s->map.width);
+    *y = (uint8_t)(cell_index / s->map.width);
+    return true;
+}
+
+void game_client_apply_moved(GameState *s, uint8_t player_id,
+                             uint16_t cell_index)
+{
+    uint8_t x, y;
+    if (!s || player_id >= MAX_PLAYERS || !cell_to_xy(s, cell_index, &x, &y)) return;
+    s->players[player_id].x = x;
+    s->players[player_id].y = y;
+    s->players[player_id].alive = true;
+}
+
+void game_client_apply_bomb(GameState *s, uint8_t player_id,
+                            uint16_t cell_index)
+{
+    uint8_t x, y;
+    if (!s || !cell_to_xy(s, cell_index, &x, &y)) return;
+
+    for (int i = 0; i < s->bomb_count; i++) {
+        if (s->bombs[i].active && s->bombs[i].x == x && s->bombs[i].y == y) return;
+    }
+    if (s->bomb_count >= MAX_BOMBS) return;
+
+    Bomb *b = &s->bombs[s->bomb_count++];
+    memset(b, 0, sizeof(*b));
+    b->x = x;
+    b->y = y;
+    b->owner_id = player_id;
+    b->radius = DEFAULT_RADIUS;
+    b->ticks_remaining = DEFAULT_FUSE_TICKS;
+    b->active = true;
+}
+
+static void add_client_explosion(GameState *s, uint8_t x, uint8_t y)
+{
+    if (s->explosion_count >= MAX_EXPLOSIONS) return;
+    ExplosionCell *e = &s->explosions[s->explosion_count++];
+    e->x = x;
+    e->y = y;
+    e->owner_id = 255;
+    e->ticks_remaining = s->map.explosion_duration;
+}
+
+void game_client_apply_explosion_start(GameState *s, uint8_t radius,
+                                       uint16_t cell_index)
+{
+    uint8_t x, y;
+    if (!s || !cell_to_xy(s, cell_index, &x, &y)) return;
+
+    for (int i = 0; i < s->bomb_count; i++) {
+        if (s->bombs[i].active && s->bombs[i].x == x && s->bombs[i].y == y) {
+            s->bombs[i] = s->bombs[s->bomb_count - 1];
+            s->bomb_count--;
+            break;
+        }
+    }
+
+    add_client_explosion(s, x, y);
+    const int dx[4] = {0, 0, -1, 1};
+    const int dy[4] = {-1, 1, 0, 0};
+    for (int dir = 0; dir < 4; dir++) {
+        for (uint8_t step = 1; step <= radius; step++) {
+            int nx = (int)x + dx[dir] * step;
+            int ny = (int)y + dy[dir] * step;
+            if (nx < 0 || ny < 0 || nx >= s->map.width || ny >= s->map.height) break;
+            CellType ct = s->map.cells[(size_t)ny * s->map.width + (size_t)nx];
+            if (ct == CELL_HARD_WALL) break;
+            add_client_explosion(s, (uint8_t)nx, (uint8_t)ny);
+            if (ct == CELL_SOFT_BLOCK) break;
+        }
+    }
+}
+
+void game_client_apply_explosion_end(GameState *s, uint16_t cell_index)
+{
+    (void)cell_index;
+    if (!s) return;
+    s->explosion_count = 0;
+}
+
+void game_client_apply_death(GameState *s, uint8_t player_id)
+{
+    if (!s || player_id >= MAX_PLAYERS) return;
+    s->players[player_id].alive = false;
+    s->players[player_id].lives = 0;
+}
+
+void game_client_apply_bonus_available(GameState *s, uint8_t bonus_type,
+                                       uint16_t cell_index)
+{
+    uint8_t x, y;
+    if (!s || !cell_to_xy(s, cell_index, &x, &y)) return;
+    size_t idx = (size_t)y * s->map.width + x;
+    s->map.cells[idx] = CELL_BONUS;
+    s->map.bonus_types[idx] = (bonus_type <= BONUS_MEGA)
+        ? (BonusType)bonus_type
+        : BONUS_SPEED;
+}
+
+void game_client_apply_bonus_retrieved(GameState *s, uint8_t player_id,
+                                       uint16_t cell_index)
+{
+    (void)player_id;
+    uint8_t x, y;
+    if (!s || !cell_to_xy(s, cell_index, &x, &y)) return;
+    s->map.cells[(size_t)y * s->map.width + x] = CELL_EMPTY;
+}
+
+void game_client_apply_block_destroyed(GameState *s, uint16_t cell_index)
+{
+    uint8_t x, y;
+    if (!s || !cell_to_xy(s, cell_index, &x, &y)) return;
+    s->map.cells[(size_t)y * s->map.width + x] = CELL_EMPTY;
+}
+
+void game_client_apply_winner(GameState *s, int8_t winner)
+{
+    if (!s) return;
+    s->game_over = true;
+    s->winner = winner;
 }
