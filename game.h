@@ -15,16 +15,11 @@
 #define MAX_MAP_HEIGHT     255
 #define RESPAWN_INVINCIBLE_TICKS 60 /* 3s */
 
-
 #define DEFAULT_LIVES        3
 #define DEFAULT_BOMBS        1
 #define DEFAULT_RADIUS       1
 #define DEFAULT_FUSE_TICKS  60   /* 3 s × 20 ticks/s */
 #define DEFAULT_SPEED        3   /* cells/s  →  cooldown = 20/3 = 6 ticks */
-
-#define SPEED_BONUS_DELTA    1
-#define RADIUS_BONUS_DELTA   1
-#define FUSE_BONUS_DELTA    20   /* +1 second */
 
 #define NO_WINNER           -1
 #define GAMEMODE_COUNT       2
@@ -32,8 +27,8 @@
 /* ── Enums ──────────────────────────────────────────────────────────────── */
 
 typedef enum {
-    GAMEMODE_MOBILITY = 0,  /* speed, kick, shield  — fast & tactical */
-    GAMEMODE_BIG_BOOM = 1   /* rapid, kick, radius  — large explosions */
+    GAMEMODE_MOBILITY = 0,  /* open arena  — room to manoeuvre */
+    GAMEMODE_BIG_BOOM = 1   /* dense arena — close-quarters combat */
 } GameMode;
 
 typedef enum {
@@ -44,12 +39,9 @@ typedef enum {
 } CellType;
 
 typedef enum {
-    BONUS_SPEED   = 0,
-    BONUS_RADIUS  = 1,
-    BONUS_FUSE    = 2,
-    BONUS_SHIELD  = 3,  /* absorbs one explosion hit */
-    BONUS_KICK    = 4,  /* moving into a bomb slides it */
-    BONUS_RAPID   = 5   /* next bomb ignores soft blocks, reaches hard wall */
+    BONUS_SHIELD  = 0,  /* absorbs one explosion hit */
+    BONUS_KICK    = 1,  /* moving into a bomb slides it */
+    BONUS_MEGA    = 2   /* next bomb ignores soft blocks, reaches hard wall */
 } BonusType;
 
 typedef enum {
@@ -87,7 +79,7 @@ typedef struct {
     bool     alive;
     bool     shielded;          /* absorbs next explosion hit */
     bool     can_kick;          /* can slide bombs by walking into them */
-    bool     rapid_next;        /* next placed bomb will be full-range */
+    bool     mega_next;         /* next placed bomb will be full-range (mega blast) */
     ActionQueue queue;
 } Player;
 

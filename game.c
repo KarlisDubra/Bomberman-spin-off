@@ -84,24 +84,9 @@ static void add_explosion_cell(GameState *s, uint8_t x, uint8_t y, uint8_t owner
 static void apply_bonus(Player *player, BonusType bonus_type)
 {
     switch (bonus_type) {
-    case BONUS_SPEED:
-        player->speed = (uint8_t)(player->speed + SPEED_BONUS_DELTA);
-        break;
-    case BONUS_RADIUS:
-        player->radius = (uint8_t)(player->radius + RADIUS_BONUS_DELTA);
-        break;
-    case BONUS_FUSE:
-        player->fuse_time = (uint16_t)(player->fuse_time + FUSE_BONUS_DELTA);
-        break;
-    case BONUS_SHIELD:
-        player->shielded = true;
-        break;
-    case BONUS_KICK:
-        player->can_kick = true;
-        break;
-    case BONUS_RAPID:
-        player->rapid_next = true;
-        break;
+    case BONUS_SHIELD: player->shielded   = true; break;
+    case BONUS_KICK:   player->can_kick   = true; break;
+    case BONUS_MEGA:   player->mega_next = true; break;
     }
 }
 
@@ -251,11 +236,11 @@ void game_tick(GameState *s)
                 new_bomb->x             = player->x;
                 new_bomb->y             = player->y;
                 new_bomb->owner_id      = (uint8_t)i;
-                new_bomb->radius        = player->rapid_next ? MAX_MAP_WIDTH : player->radius;
+                new_bomb->radius        = player->mega_next ? MAX_MAP_WIDTH : player->radius;
                 new_bomb->ticks_remaining = player->fuse_time;
-                new_bomb->full_range    = player->rapid_next;
+                new_bomb->full_range    = player->mega_next;
                 new_bomb->active        = true;
-                player->rapid_next      = false;
+                player->mega_next      = false;
                 player->bombs_available--;
             }
         } else {
@@ -369,12 +354,9 @@ void game_tick(GameState *s)
                         /* Transfer the dead player's active bonuses to their killer */
                         if (killer_id != (uint8_t)player_idx) {
                             Player *killer_player = &s->players[killer_id];
-                            if (player->can_kick)                         killer_player->can_kick    = true;
-                            if (player->shielded)                         killer_player->shielded    = true;
-                            if (player->rapid_next)                       killer_player->rapid_next  = true;
-                            if (player->speed    > DEFAULT_SPEED)         killer_player->speed      += player->speed    - DEFAULT_SPEED;
-                            if (player->radius   > DEFAULT_RADIUS)        killer_player->radius     += player->radius   - DEFAULT_RADIUS;
-                            if (player->fuse_time > DEFAULT_FUSE_TICKS)   killer_player->fuse_time  += player->fuse_time - DEFAULT_FUSE_TICKS;
+                            if (player->can_kick)   killer_player->can_kick   = true;
+                            if (player->shielded)   killer_player->shielded   = true;
+                            if (player->mega_next) killer_player->mega_next = true;
                             s->players[killer_id].kills++;
                         }
                         player->alive = false;
@@ -386,7 +368,7 @@ void game_tick(GameState *s)
                         player->invincible_ticks = RESPAWN_INVINCIBLE_TICKS;
                         player->can_kick       = false;
                         player->shielded       = false;
-                        player->rapid_next     = false;
+                        player->mega_next     = false;
                         player->speed          = DEFAULT_SPEED;
                         player->radius         = DEFAULT_RADIUS;
                         player->fuse_time      = DEFAULT_FUSE_TICKS;

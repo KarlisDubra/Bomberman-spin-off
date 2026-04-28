@@ -144,14 +144,14 @@ int main(int argc, char *argv[])
 {
     /* Parse args: optional map file, optional player count */
     for (int i = 1; i < argc; i++) {
-        char *arg = argv[i];
+        char *a = argv[i];
         /* Pure number → player count, implies random lobby */
-        int player_count = atoi(arg);
-        if (player_count >= 2 && player_count <= MAX_PLAYERS) {
-            g_player_count = (uint8_t)player_count;
-        } else if (strcmp(arg, "random") != 0) {
+        int n = atoi(a);
+        if (n >= 2 && n <= MAX_PLAYERS) {
+            g_player_count = (uint8_t)n;
+        } else if (strcmp(a, "random") != 0) {
             /* Treat as map file — skip lobby */
-            g_map_file = arg;
+            g_map_file = a;
         }
         /* "random" is accepted but we default to lobby anyway */
     }
@@ -231,14 +231,19 @@ int main(int argc, char *argv[])
 
         } else { /* PHASE_RESULTS */
             render_frame(g_state);
-            int w = game_get_winner(g_state);
-            render_game_over(g_state->map.width, g_state->map.height, w);
-            if (w == NO_WINNER)
+            int winner = game_get_winner(g_state);
+            char over_msg[32];
+            if (winner == NO_WINNER)
+                snprintf(over_msg, sizeof(over_msg), "DRAW");
+            else
+                snprintf(over_msg, sizeof(over_msg), "PLAYER %d WINS", winner + 1);
+            render_game_over(g_state->map.width, g_state->map.height, winner, over_msg);
+            if (winner == NO_WINNER)
                 snprintf(title, sizeof(title),
                          "Bomberman — DRAW   [R] lobby  [Esc] quit");
             else
                 snprintf(title, sizeof(title),
-                         "Bomberman — Player %d wins!   [R] lobby  [Esc] quit", w);
+                         "Bomberman — Player %d wins!   [R] lobby  [Esc] quit", winner);
         }
 
         glfwSetWindowTitle(window, title);

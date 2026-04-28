@@ -149,17 +149,13 @@ static void draw_digit(float cx, float cy, float size,
 
 /* ── Bonus colour lookup ────────────────────────────────────────────────── */
 
-/* Returns the RGB colour associated with each bonus type.
- * Default (SPEED/FUSE) is yellow; all others are distinct colours. */
 static void bonus_color(BonusType bt, float *r, float *g, float *b)
 {
-    *r = 1.0f; *g = 1.0f; *b = 0.0f; /* SPEED / FUSE — yellow */
     switch (bt) {
-    case BONUS_RADIUS: *r = 0.0f; *g = 0.9f; *b = 1.0f; break; /* cyan   */
-    case BONUS_SHIELD: *r = 0.3f; *g = 0.7f; *b = 1.0f; break; /* blue   */
-    case BONUS_KICK:   *r = 0.9f; *g = 0.3f; *b = 0.9f; break; /* purple */
-    case BONUS_RAPID:  *r = 1.0f; *g = 0.1f; *b = 0.1f; break; /* red    */
-    default: break;
+    case BONUS_SHIELD: *r = 0.25f; *g = 0.55f; *b = 1.00f; break; /* blue  */
+    case BONUS_KICK:   *r = 0.20f; *g = 1.00f; *b = 0.15f; break; /* lime  */
+    case BONUS_MEGA:   *r = 1.00f; *g = 0.10f; *b = 0.10f; break; /* red   */
+    default:           *r = 0.80f; *g = 0.80f; *b = 0.80f; break; /* grey  */
     }
 }
 
@@ -359,10 +355,10 @@ static void draw_hud(const GameState *s, int map_width, int map_height)
                 ability_x += 14.0f;
             }
             if (s->players[i].can_kick) {
-                circle(ability_x, bot_y, 5.0f, 0.9f, 0.3f, 0.9f, 1.0f);
+                circle(ability_x, bot_y, 5.0f, 0.20f, 1.00f, 0.15f, 1.0f);
                 ability_x += 14.0f;
             }
-            if (s->players[i].rapid_next) {
+            if (s->players[i].mega_next) {
                 circle(ability_x, bot_y, 5.0f, 1.0f, 0.1f, 0.1f, 1.0f);
             }
 
@@ -374,6 +370,10 @@ static void draw_hud(const GameState *s, int map_width, int map_height)
         }
     }
 }
+
+/* Forward declaration — defined after render_game_over in this file */
+static void draw_string(const char *text, float cx, float cy, float h,
+                        float r, float g, float b);
 
 /* ── Public API ─────────────────────────────────────────────────────────── */
 
@@ -410,22 +410,28 @@ void render_frame(const GameState *s)
     draw_hud(s, s->map.width, s->map.height);
 }
 
-void render_game_over(int map_width, int map_height, int winner)
+void render_game_over(int map_width, int map_height, int winner, const char *msg)
 {
     float win_w = (float)(map_width  * CELL_SIZE);
     float win_h = (float)(map_height * CELL_SIZE);
 
     rect(0, 0, win_w, win_h, 0.0f, 0.0f, 0.0f, 0.55f);
 
-    /* Default to red for a draw; use the winner's colour if there is one */
     float win_r = 0.8f, win_g = 0.1f, win_b = 0.1f;
     if (winner >= 0 && winner < MAX_PLAYERS) {
         win_r = PLAYER_COLORS[winner][0];
         win_g = PLAYER_COLORS[winner][1];
         win_b = PLAYER_COLORS[winner][2];
     }
-    float band_h = win_h * 0.18f;
-    rect(0, (win_h - band_h) * 0.5f, win_w, band_h, win_r, win_g, win_b, 0.75f);
+    float band_h = win_h * 0.24f;
+    float band_y = (win_h - band_h) * 0.5f;
+    rect(0, band_y, win_w, band_h, win_r, win_g, win_b, 0.78f);
+
+    if (msg) {
+        float text_h = band_h * 0.42f;
+        draw_string(msg, win_w * 0.5f, band_y + band_h * 0.5f, text_h,
+                    1.0f, 1.0f, 1.0f);
+    }
 }
 
 /* ── Stroke font ────────────────────────────────────────────────────────── */
@@ -439,24 +445,51 @@ typedef struct { float x1,y1,x2,y2; } Stk;
 
 #define S(x1,y1,x2,y2) {x1,y1,x2,y2}
 
+static const Stk G_A[]={S(-.35f,.5f,.0f,-.5f),S(.35f,.5f,.0f,-.5f),
+ S(-.18f,.12f,.18f,.12f)};
 static const Stk G_B[]={S(-.35f,-.5f,-.35f,.5f),S(-.35f,-.5f,.10f,-.5f),
  S(.10f,-.5f,.38f,-.32f),S(.38f,-.32f,.38f,-.05f),S(.38f,-.05f,.10f,.0f),
  S(-.35f,.0f,.10f,.0f),
  S(.10f,.0f,.40f,.22f),S(.40f,.22f,.40f,.46f),S(.40f,.46f,.10f,.5f),
  S(-.35f,.5f,.10f,.5f)};
+static const Stk G_C[]={S(.32f,-.30f,.15f,-.5f),S(.15f,-.5f,-.15f,-.5f),
+ S(-.15f,-.5f,-.38f,-.28f),S(-.38f,-.28f,-.38f,.28f),
+ S(-.38f,.28f,-.15f,.5f),S(-.15f,.5f,.15f,.5f),S(.15f,.5f,.32f,.30f)};
+static const Stk G_D[]={S(-.32f,-.5f,-.32f,.5f),S(-.32f,-.5f,.10f,-.5f),
+ S(.10f,-.5f,.38f,-.28f),S(.38f,-.28f,.38f,.28f),
+ S(.38f,.28f,.10f,.5f),S(.10f,.5f,-.32f,.5f)};
+static const Stk G_E[]={S(-.32f,-.5f,-.32f,.5f),S(-.32f,-.5f,.35f,-.5f),
+ S(-.32f,.0f,.25f,.0f),S(-.32f,.5f,.35f,.5f)};
 static const Stk G_G[]={S(.38f,-.30f,.18f,-.5f),S(.18f,-.5f,-.18f,-.5f),
  S(-.18f,-.5f,-.38f,-.30f),S(-.38f,-.30f,-.38f,.30f),
  S(-.38f,.30f,-.18f,.5f),S(-.18f,.5f,.18f,.5f),S(.18f,.5f,.38f,.30f),
  S(.38f,.30f,.38f,.0f),S(.38f,.0f,.05f,.0f)};
+static const Stk G_H[]={S(-.35f,-.5f,-.35f,.5f),S(.35f,-.5f,.35f,.5f),
+ S(-.35f,.0f,.35f,.0f)};
 static const Stk G_I[]={S(-.25f,-.5f,.25f,-.5f),S(.0f,-.5f,.0f,.5f),
  S(-.25f,.5f,.25f,.5f)};
+static const Stk G_K[]={S(-.32f,-.5f,-.32f,.5f),S(-.32f,.0f,.35f,-.5f),
+ S(-.32f,.0f,.35f,.5f)};
 static const Stk G_L[]={S(-.15f,-.5f,-.15f,.5f),S(-.15f,.5f,.38f,.5f)};
 static const Stk G_M[]={S(-.38f,.5f,-.38f,-.5f),S(-.38f,-.5f,.0f,.0f),
  S(.0f,.0f,.38f,-.5f),S(.38f,-.5f,.38f,.5f)};
+static const Stk G_N[]={S(-.35f,.5f,-.35f,-.5f),S(-.35f,-.5f,.35f,.5f),
+ S(.35f,.5f,.35f,-.5f)};
 static const Stk G_O[]={S(-.18f,-.5f,.18f,-.5f),S(.18f,-.5f,.38f,-.30f),
  S(.38f,-.30f,.38f,.30f),S(.38f,.30f,.18f,.5f),S(.18f,.5f,-.18f,.5f),
  S(-.18f,.5f,-.38f,.30f),S(-.38f,.30f,-.38f,-.30f),S(-.38f,-.30f,-.18f,-.5f)};
+static const Stk G_P[]={S(-.32f,.5f,-.32f,-.5f),S(-.32f,-.5f,.10f,-.5f),
+ S(.10f,-.5f,.38f,-.28f),S(.38f,-.28f,.38f,.0f),
+ S(.38f,.0f,.10f,.0f),S(.10f,.0f,-.32f,.0f)};
+static const Stk G_R[]={S(-.32f,.5f,-.32f,-.5f),S(-.32f,-.5f,.10f,-.5f),
+ S(.10f,-.5f,.38f,-.28f),S(.38f,-.28f,.38f,.0f),
+ S(.38f,.0f,.10f,.0f),S(.10f,.0f,-.32f,.0f),S(.10f,.0f,.38f,.5f)};
+static const Stk G_S[]={S(.32f,-.5f,-.10f,-.5f),S(-.10f,-.5f,-.35f,-.28f),
+ S(-.35f,-.28f,-.35f,.0f),S(-.35f,.0f,.35f,.0f),
+ S(.35f,.0f,.35f,.28f),S(.35f,.28f,.10f,.5f),S(.10f,.5f,-.32f,.5f)};
 static const Stk G_T[]={S(-.40f,-.5f,.40f,-.5f),S(.0f,-.5f,.0f,.5f)};
+static const Stk G_W[]={S(-.38f,-.5f,-.20f,.5f),S(-.20f,.5f,.0f,.0f),
+ S(.0f,.0f,.20f,.5f),S(.20f,.5f,.38f,-.5f)};
 static const Stk G_Y[]={S(-.38f,-.5f,.0f,.0f),S(.38f,-.5f,.0f,.0f),
  S(.0f,.0f,.0f,.5f)};
 
@@ -465,19 +498,21 @@ static const Stk G_Y[]={S(-.38f,-.5f,.0f,.0f),S(.38f,-.5f,.0f,.0f),
 static void draw_char(char c, float cx, float cy, float h,
                       float r, float g, float b)
 {
+    if (c >= '0' && c <= '9') {
+        draw_digit(cx, cy, h, c - '0', r, g, b);
+        return;
+    }
     const Stk *strokes = NULL;
     int stroke_count = 0;
+#define SC(ch,letter) case ch: strokes=G_##letter; stroke_count=(int)(sizeof(G_##letter)/sizeof(G_##letter[0])); break
     switch (c) {
-    case 'B': strokes=G_B; stroke_count=(int)(sizeof(G_B)/sizeof(G_B[0])); break;
-    case 'G': strokes=G_G; stroke_count=(int)(sizeof(G_G)/sizeof(G_G[0])); break;
-    case 'I': strokes=G_I; stroke_count=(int)(sizeof(G_I)/sizeof(G_I[0])); break;
-    case 'L': strokes=G_L; stroke_count=(int)(sizeof(G_L)/sizeof(G_L[0])); break;
-    case 'M': strokes=G_M; stroke_count=(int)(sizeof(G_M)/sizeof(G_M[0])); break;
-    case 'O': strokes=G_O; stroke_count=(int)(sizeof(G_O)/sizeof(G_O[0])); break;
-    case 'T': strokes=G_T; stroke_count=(int)(sizeof(G_T)/sizeof(G_T[0])); break;
-    case 'Y': strokes=G_Y; stroke_count=(int)(sizeof(G_Y)/sizeof(G_Y[0])); break;
-    default:  return; /* space and unknowns = skip */
+    SC('A',A); SC('B',B); SC('C',C); SC('D',D); SC('E',E);
+    SC('G',G); SC('H',H); SC('I',I); SC('K',K); SC('L',L);
+    SC('M',M); SC('N',N); SC('O',O); SC('P',P); SC('R',R);
+    SC('S',S); SC('T',T); SC('W',W); SC('Y',Y);
+    default: return; /* space and unknowns = skip */
     }
+#undef SC
     float half_height = h * 0.5f;
     glColor3f(r, g, b);
     glBegin(GL_LINES);
@@ -544,10 +579,10 @@ static const float MODE_COLOR[GAMEMODE_COUNT][3]  = {
     { 0.10f, 0.85f, 0.85f },   /* MOBILITY  */
     { 1.00f, 0.55f, 0.10f },   /* BIG BOOM  */
 };
-/* Bonus icons shown below each map title (3 per mode) */
+/* All modes share the same three bonuses — map difference is layout/density */
 static const BonusType MODE_ICONS[GAMEMODE_COUNT][3] = {
-    { BONUS_SPEED, BONUS_KICK, BONUS_SHIELD },   /* MOBILITY */
-    { BONUS_RAPID, BONUS_KICK, BONUS_RADIUS },   /* BIG BOOM */
+    { BONUS_SHIELD, BONUS_KICK, BONUS_MEGA },
+    { BONUS_SHIELD, BONUS_KICK, BONUS_MEGA },
 };
 
 void render_lobby(int win_w, int win_h,
@@ -620,12 +655,39 @@ void render_lobby(int win_w, int win_h,
         }
     }
 
+    /* ── Booster legend ──────────────────────────────────────────────────── */
+
+    /* Thin separator line */
+    float sep_y = (float)win_h * 0.725f;
+    rect(win_w * 0.08f, sep_y, win_w * 0.84f, 1.0f, 0.35f, 0.35f, 0.45f, 1.0f);
+
+    /* Three bonus entries: coloured diamond + label, evenly spaced */
+    static const BonusType LEGEND_BONUS[3]  = { BONUS_SHIELD, BONUS_KICK, BONUS_MEGA };
+    static const char     *LEGEND_LABEL[3]  = { "SHIELD",     "KICK",     "BLAST"    };
+    static const char     *LEGEND_DESC[3]   = { "ABSORBS ONE HIT",
+                                                "KICK BOMBS",
+                                                "BREAKS WALLS" };
+    float legend_y   = (float)win_h * 0.785f;
+    float desc_y     = legend_y + 22.0f;
+    float slots[3]   = { (float)win_w * 0.22f,
+                         (float)win_w * 0.50f,
+                         (float)win_w * 0.78f };
+    for (int k = 0; k < 3; k++) {
+        float dr, dg, db;
+        bonus_color(LEGEND_BONUS[k], &dr, &dg, &db);
+        diamond(slots[k] - 36.0f, legend_y, 8.0f, dr, dg, db);
+        draw_string(LEGEND_LABEL[k], slots[k] + 16.0f, legend_y, 16.0f,
+                    dr, dg, db);
+        draw_string(LEGEND_DESC[k], slots[k], desc_y, 11.0f,
+                    0.52f, 0.52f, 0.60f);
+    }
+
     /* Mode name hints at the bottom of the screen */
-    float hint_y = (float)win_h - 22.0f;
-    draw_string("MOBILITY", (float)win_w * 0.25f, hint_y, 14.0f,
-                0.45f, 0.45f, 0.55f);
-    draw_string("BIG BOOM", (float)win_w * 0.75f, hint_y, 14.0f,
-                0.45f, 0.45f, 0.55f);
+    float hint_y = (float)win_h - 18.0f;
+    draw_string("MOBILITY", (float)win_w * 0.25f, hint_y, 13.0f,
+                0.40f, 0.40f, 0.50f);
+    draw_string("BIG BOOM", (float)win_w * 0.75f, hint_y, 13.0f,
+                0.40f, 0.40f, 0.50f);
 }
 
 void render_cleanup(void) { /* nothing to free */ }

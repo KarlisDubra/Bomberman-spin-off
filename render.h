@@ -24,10 +24,11 @@ void render_init(int map_width, int map_height);
 void render_frame(const GameState *state);
 
 /*
- * Draw a semi-transparent "game over" overlay.
+ * Draw a semi-transparent "game over" overlay with winner text.
  * Call render_frame first, then this on top.
+ * msg: "PLAYER 1 WINS" or "DRAW" etc.
  */
-void render_game_over(int map_width, int map_height, int winner);
+void render_game_over(int map_width, int map_height, int winner, const char *msg);
 
 /*
  * Draw the lobby: two mini-map previews with mode titles.
